@@ -1,0 +1,635 @@
+---
+title: "Data Mining Capstone Assessment Report"
+author: "Student: Sacha Schwab"
+date: "August 2019"
+
+output: 
+    html_document:
+      theme: flatly 
+      highlight: tango
+      toc: false
+      toc_float: false
+---
+
+<style type="text/css"s>
+h3.style {
+  text-indent: 25px; 
+  font-size: 22px }
+body {
+  font-size: 15px
+}
+</style>
+
+## Abstract
+New approaches to develop effective recommendations from large bank datasets are valuable and in the focus of commercial companies.
+
+The purpose of this report is to document the attempt of the application of data mining methods for recommendations of bank products for specific customers.
+
+The methodological approach is to explore whether product recommendation strategies can be achieved using three different methods, i.e. cluster approach, PCA and compare these with basket analysis results. The cluster approach and PCA can be combined for visualisation purpose. PCA also adds to the value as it can be additionally be used for dimensionality reduction.
+
+My finding is that there is potential in this approach as it generates results that can be efficiently understood by domain knowledge owners, which is important for further development and refinement.
+
+Conclusion is that using clustering combined with PCA/MCA opens doors for addressing specific recommendations to groups of clients. Further time should be invested into combining results of basket analysis results with those from clustering / PCA-MCA.
+
+I thank the Data Mining Subject Team for the experience and their hard work.
+
+## Introduction
+Product recommendations are an important aspect of activities in nowadays in business (see Kordik), i.e. the field in which I work. According to my research, data mining methods such as clustering and basket analysis may have not been explored in public, contrary to e.g. machine learning methods such as decision trees, gradient boosting, neural networks etc.
+
+For the purpose of this study I explored 3 main methods of data mining so to identify their potential for recommending banking products. My original concept involved:
+
+(a) Clustering: Use hierarchical clustering to identify customer and product groups, and combine or approach each other so to identify best fits of product ranges for the various customer groups; 
+(b) PCA: provide 2-3 main components of PCA for usage of visualisation of the various clusters and outliers; 
+(c) Basket analysis: use Apriori algorithm to identify relevant baskets.
+(d) combine basket analysis with clustering, i.e. analyse the product baskets belonging to the various customer clusters identified in step (a).
+
+As I was using data from Kaggle I made sure that none of my approaches or methods have been in-depth discussed or exposed as code in public. My finding there was that the competition members almost exclusively used gradient boosting. Some methods or algorithms were discussed but none of them in a depth that would have helped to develop my study. The data exploration posts are superficial and usually quite poor. Hence, the potential for new approaches and code is big.
+
+### Data
+
+The data I used is taken from the Santander product recommendation dataset from Kaggle. It contains 13 million records of roughly 90k customers, spread over 17 months from January 2015 until May 2016. It provides monthly records of a number of customer characteristics, and 1/0 notions of whether one of 24 products (e.g. savings, credit card) was part of the client's portfolio at that time. 
+
+The data has 5 ordinal, 9 nominal, 5 continuous and 30 dichotomous variables. 
+
+### Preprocessing
+
+Due to the size of the dataset and processing time on my computer I selected a random random sample of 1 million records from the original dataset. I pre-processed the data by
+
+(a) extracting the relevant transactions per customer. I defined these as being any change of a product from 0 (not in portfolio) to 1 (in portfolio) compared between two consecutive months; 
+(b) extracting unique customer information; as the information may change over time, and my approach is to provide information at significant events in time, I took the customer record at the time when a customer had the biggest number of products in the basked; 
+(c) eliminating customer variables that were not logical or did not contribute in terms of variance; 
+(d) conversion of categorical variables to R factors; 
+(e) calculating the number of days of first contact with a customer since last record; 
+(f) as in particular PCA is sensitive to outliers I eliminated outliers observation (e.g. the age or income variables).
+
+As I was using data from Kaggle I made thoroughly sure that none of my approaches or methods have previously been in-depth discussed or exposed in public. My finding there was that the competition members almost exclusively used gradient boosting. Some methods or algorithms were discussed but none of them in a-depth (i.e. only presented as an idea). None of the notions would have actually helped to develop my approach Also, the data exploration posts regarding this dataset are (despite being lengthy) superficial and usually quite poor. Hence, the potential for new approaches and code is considerable and made the task even more interesting.
+
+## Methods
+
+### 0. Data load, cleaning, preprocessing and exploration
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+# Libraries
+library(dplyr)
+library(rlist)
+library(ggplot2)
+library(cluster)
+library(class)
+library(stats)
+library(dendextend)
+library(PCAmixdata)
+library(RColorBrewer)
+library(reshape2)
+library(Matrix)
+library(rlist)
+library(arules)
+library(plot3D)
+library(scatterplot3d) # load
+library(rgl)
+
+```
+Load the data, provide new variable names and explore the dataset as a whole. Inactive customers were filtered out. My preliminary exploration finding was that inactive customer records do not provide relevant data (their records may however be interesting for another project, e.g. for development of a 'leaver prevention' method).
+
+```{r, warning=FALSE, echo=TRUE, eval = FALSE}
+df_orig <- read.csv(file = ".../train_ver2", stringsAsFactors=FALSE)
+```
+```{r, echo=FALSE, eval = FALSE}
+new_names <- c("date_capture","customer_id",
+               "employed","country_resid","sex","age","date_firstcontact","cust_newIndex",
+               "cust_seniority","indrel","date_lastPrimaryCustomer","cust_type","cust_status",
+               "cust_resSameAsBank","indext","custo_spouseOfEmp","entry_channel","indfall",
+               "tipodom","province_code","nomprov","cust_activityIndex","income_householdGross",
+               "cust_segment","ac_savings","ac_guarantees","ac_current","ac_derivatives","ac_payroll",
+               "ac_junior","ac_masParticular","ac_particular","ac_particularPlus","ac_shortTermDeposit",
+               "ac_medTermDeposit","ac_longTermDeposit","ac_eAccount","ac_funds","ac_mortgage","ac_pension",
+               "ac_loans","ac_taxes","ac_creditCard","ac_securities","ac_homeAcct","ac_payroll_","acc_pensions",
+               "acc_DirectDebit")
+names(df_orig) <- new_names
+length(df_orig) # 49 variables
+#glimpse(df_origin) # 5 ordinal, 9 nominal, 5 continuous and 30 dichotomous variables
+summary(df_orig)
+head(df_orig) # Get a first detail glimpse
+# Several entries per customer number. Find out why
+df_orig %>% filter(customer_id == 1051278) # There are entries for 17 subsequent months from Jan 2015 to May 2016
+# Filter out inactive customers. From previous runs these do not appear to have any products in their portfolio
+```
+
+```{r, echo=FALSE, eval = FALSE}
+df_orig <- filter(df_orig, cust_status == "A")
+```
+
+```{r, warning=FALSE, echo=FALSE, eval = FALSE}
+# Drop some columns with exclusively NAs, and such that from dataset description do not make sense (from a domain point of view)
+df_orig <- df_orig %>% select(-indrel)
+df_orig <- df_orig %>% select(-one_of("indext", "indfall", "tipodom", "nomprov", "date_lastPrimaryCustomer", "custo_spouseOfEmp"))
+```
+The dataset, after load and first glimpse, is cleaned by dropping columns exclusively containing NAs, and such that from dataset description do not make sense (from a domain point of view).
+
+```{r, warning=FALSE, eval = FALSE}
+df_nafree <- na.omit(df_orig)
+nrow(df_nafree) # 3 million observations
+```
+As the dataset is big (eating considerable computing time) I selected a random sample of records belonging to 25k customers from a total of 340k customers.
+```{r, warning=FALSE, eval = FALSE}
+# Create df with distinct customer observations
+df_cust <- data.frame(customer_id = unique(df_nafree$customer_id))
+nrow(df_cust) # 339'254 different customers
+
+# Taking a sample for the sake of computationability
+df_cust_sample <- sample_n(df_cust, 25000)
+
+# Get the the full record for these customers from NA-free data frame
+df_nafree_samples <- df_nafree[df_nafree_samples$customer_id %in% df_cust$customer_id,]
+```
+
+```{r, warning=FALSE, echo = FALSE, eval = FALSE}
+# Enhance so it can take on further unique customer data
+# If reading from drive... df_nafree_samples <- select(df_nafree_samples, -X)
+# Verify... names(df_cust_sample)
+df_cust_sample[,2:40] <- NA
+colnames(df_cust_sample) <- names(df_nafree_samples[2:41])
+```
+
+After selecting the samples the data is transformed to 2 data frames, one to hold the relevant transactions (i.e. adding products to a customer's portfolio), and one holding unique customer information, with the relevant record from the original data frame being the one at which the customer held the maximum number of products. This as the 'maximum portfolio' is the most interesting point in time as the 'starting point' for the recommendations. Please refer to the R code for detail procedures applied.
+
+```{r, warning=FALSE, echo = FALSE, eval = FALSE}
+# keep 1) for each customer the "best" stage record, 2) keep all "up" i.d. 0=>1 transactions
+
+# Prepare the df's
+df_nafree_samples <- arrange(df_nafree_samples, customer_id, date_capture)
+df_cust_sample <- arrange(df_cust_sample, customer_id)
+t <- nrow(df_cust_sample)
+
+# Provide empty df to hold relevant transactions
+df_transact <- data.frame(data.frame(matrix(ncol = 26, nrow = 1)))
+
+colnames(df_transact) <- c("customer_id", "date_capture", names(df_nafree_samples[,18:41]))
+
+# Initiate helper dataframe used in the loops below
+df_int <- df_transact[1,]
+
+# Counter for progress tracking
+counter <- seq(500, 25000, by = 500)
+
+# Run the loops
+for (crow in 1:t) {
+  cust <- df_cust_sample$customer_id[crow]
+  
+  # Take rows of df_nafree with that customer (put in little df)
+  df_partC <- filter(df_nafree_samples, customer_id == cust)
+  
+  # Check initial row's total of products
+  tot <- sum(df_partC[1,18:41])
+  highest <- sum(df_partC[1,18:41])
+  
+  # Keep track whether notion of highest number of products
+  tohigh <- FALSE
+  
+  # Calculate sum of 1's per product, calculate mean, add to df_cust
+  for (trow in 1:nrow(df_partC)) {
+    # Sum of products of current row
+    actrow <- sum(df_partC[trow,18:41])
+    actrow
+    #print(cat("current row:", actrow))
+    if (actrow > tot) { 
+      # Keep tot as hightest
+      tot = (sum(df_partC[trow,18:41]))
+      
+      # Add the previous record and the new record to df_transact
+      df_int[1,] <- unlist(c(cust, as.character(df_partC[trow-1,1]), df_partC[trow-1,18:41]), use.names = FALSE)
+      df_int[2,] <- unlist(c(cust, as.character(df_partC[trow,1]), df_partC[trow,18:41]), use.names = FALSE)
+      df_transact <- rbind(df_transact, df_int)
+      df_cust_sample[crow,] <- df_partC[trow, 2:41]
+      
+    } else if (actrow < tot) { tot <- actrow }
+    
+    if (actrow > highest) {
+      # Add customer record with highest total
+      highest <- actrow
+      tohigh <- highest
+      df_cust_sample[crow,] <- df_partC[trow,2:41]
+    }
+  } # Result: Transaction = diff(previous row, row with higher total)
+  # If highest remained the same all over, i.e. first row was highest, add first row
+  if (tohigh == FALSE) {
+    df_cust_sample[crow,] <- df_partC[1,2:41]
+  }
+  # Progress tracking
+  if (crow %in% counter) {print(crow)}
+}
+```
+
+
+```{r, warning=FALSE, echo = FALSE, eval = TRUE }
+
+# ******** Delete for submission ***********
+df_cust_sample <- read.csv(file = "C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/df_cust_sample.csv")
+df_transact <- read.csv(file = "C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/Transactions.csv")
+df_clean_sample <- read.csv(file = "C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/df_clean_sample_2.csv")
+df_heat <- read.csv(file = "C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/df_heat.csv")
+scaled <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/scaled_forplot.csv")
+scaled <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/scaled_forplot.csv")
+melted <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/melted.csv")
+cl1_result <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/cl1_result.csv")
+cl2_result <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/cl2_result.csv")
+cl3_result <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/cl3_result.csv")
+full_result <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/full_result.csv")
+df_errs <- read.csv("C:/Users/sacha/Dropbox/JCU/05 Data Mining/Assessments/Capstone/df_err.csv")
+```
+
+
+After generation of the 2 data frames, some more clean-up needed to be done, e.g. conversion of data types in preparation of the data mining methods used below.
+
+```{r, warning=FALSE, echo = FALSE, eval = TRUE}
+# Some more clean-up
+df_cust_sample$age <- as.numeric(df_cust_sample$age)
+```
+
+```{r, echo = FALSE, eval = TRUE, fig.height = 4, fig.width = 4}
+# Eliminate outliers; For the sake of brevity of the html knit, this is in reversed order to the plots
+df_cust_sample <- filter(df_cust_sample, age < 88)
+df_cust_sample <- filter(df_cust_sample, income_householdGross < 255000)
+```
+
+Some significant plots in 'Age' and 'Income' (for the sake of brevity of this report after outlier elimination):
+
+```{r, warning=FALSE, echo = FALSE, eval = TRUE, fig.height = 3, fig.width = 3}
+
+ggplot(df_cust_sample, aes(x=age)) + geom_histogram(color="steelblue", fill="white") + ggtitle("Customer Age") + xlab("Years") + ylab("Count")
+boxplot(as.numeric(df_cust_sample$age), main = "Customer Age Range", ylab = "Age")
+```
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE, fig.height = 4, fig.width = 4}
+options(scipen=1000)
+ggplot(df_cust_sample, aes(x=income_householdGross)) + geom_histogram(color="steelblue", fill="white") + ggtitle("Income per Household Distribution") +  theme(axis.text.x = element_text(angle = 0)) + xlim(c(0, 300000)) + xlab("EUR") + ylab("Count")
+boxplot(df_cust_sample$income, main = "Income per Household Range", ylab = "EUR")
+```
+
+Also, seniority of customers (i.e. days since becoming customers) reveals some interesting 'bumps' / concentration around 0-20 and 160-180 days.
+
+```{r, warning=FALSE, echo = FALSE, eval = TRUE, fig.height = 3, fig.width = 3}
+
+ggplot(df_cust_sample, aes(x=age)) + geom_histogram(color="steelblue", fill="white") + ggtitle("Customer Seniority") + xlab("Months since becoming customer") + ylab("Count")
+boxplot(as.numeric(df_cust_sample$cust_seniority), main = "Customer Seniority Range", ylab = "Months")
+```
+
+Upon exploration, some of the variables needed to be eliminated due to different reasons (e.g. exclusively one value in variable distribution, etc.). Please refer to the R Code provided in the submission for more insight.
+
+```{r, warning=FALSE, echo = FALSE, eval = TRUE}
+# All customers reside in the same country as the bank. As this appears not to provide any meaning to the methods provided in this assessment, this variable is eliminated.
+df_cust_sample <- select(df_cust_sample, -c(cust_resSameAsBank))
+
+# 1252 customers have no segment indication. These will be eliminate in further cleaning 
+# Eliminate records for these customers from df_transaction
+segmcust <- filter(df_cust_sample, cust_segment != "")
+df_transact <- df_transact[df_transact$customer_id %in% df_cust_sample$customer_id]
+df_cust_sample <- filter(df_cust_sample, cust_segment != "")
+```
+
+```{r, warning=FALSE, echo = FALSE, eval = FALSE}
+# Some rather insignificant plots not displayed in the knit:
+hist(df_cust_sample$cust_activityIndex)
+# Majority of customers is active.
+ggplot(df_cust_sample, aes(x=province_code)) + geom_histogram()
+# The significant concentration with the code around 30 must be Madrid
+ggplot(df_cust_sample, aes(x=entry_channel)) + geom_bar()
+# There is a large variety of entry channels. MCA will show whether this variable is relevant
+ggplot(df_cust_sample, aes(x=employed)) + geom_bar()
+# Not for further use (exclusively "N" is not realistic seen the income distribution; probably the bank does not manage this variable in their database
+ggplot(df_cust_sample, aes(x=cust_type)) + geom_bar()
+# Not for further use (all on 1)
+hist(df_cust_sample$cust_newIndex)
+# Majority is below 6 last months registered. This variable differenciates the customer seniority and could therefore have quite a significant effect on data mining.
+# Customer residence
+ggplot(df_cust_sample, aes(x=country_resid)) + geom_bar()
+# All customers reside in Spain. Eliminate this variable therefore as I will have no further use
+```
+
+The date of first contact is converted to number of days since last entry in transactions (28.05.2016, i.e. let's take the end of the month). Below some random text that I deleted in the code is displayed for some strange reason. Please disregard.
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE,  fig.height = 3, fig.width = 3}
+df_cust_sample$days_firstContact <- as.Date("2016-05-30") - as.Date(df_cust_sample$date_firstcontact) 
+ggplot(df_cust_sample, aes(x=days_firstContact)) + geom_histogram(color="steelblue", fill="white") +
+  theme_minimal() + ggtitle("Days since first contact") + xlab("Days") + ylab("Count") 
+```
+
+The data exploration is followed by elimination of additional variables that were found as not contributing to explaining the data.
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+# Clean more after exploration
+fac_cols <- c("sex", "entry_channel", "province_code", "cust_activityIndex", "cust_segment", "cust_newIndex")
+df_clean <- df_cust_sample %>%
+  select(-c(cust_status, employed, cust_type, country_resid))
+# Factorise for further usage in mining
+df_clean[fac_cols] <- lapply(df_clean[fac_cols], factor)
+```
+
+```{r, warning=FALSE, echo = FALSE, eval = TRUE}
+df_clean$cust_seniority <- as.numeric(df_clean$cust_seniority)
+df_clean$age <- as.integer(df_clean$age)
+```
+
+## Methods
+
+### 1. Clustering with visual analysis of product range
+
+Hierarchical clustering appears intersting for the purpose of datasets where the number of clusters is unknown and may need to be seen in a flexible way, i.e. different purposes, e.g. Marketing and Compliance, may require different views (see e.g. Sharahi et al.). 
+
+I performed hierarchical clustering based on Gower dissimilarity distance as the data is mixed-type, i.e. categorical and continuous variables. 
+
+I explored complete linkage and Ward's algorithm, with Ward's algorithm producing visually clearer results, with probably good choices being at height 4 and 5 with 3 and 6 clusters, accordingly:
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+# Hierarchical cluster with Gower Distance (mixed-type variables)
+df_clean_sample <- df_clean %>%
+  select(-c(date_firstcontact)) %>%
+  mutate(days_firstContact = as.numeric(days_firstContact)) %>%
+  sample_n(10000)
+gower_dist <- daisy(df_clean_sample, metric = "gower")
+
+# As seen in previous exercises / assessments, Complete and Ward's Algorithm provide the best results
+points_compl <- hclust(gower_dist, method = "complete")
+points_ward <- hclust(gower_dist, method = "ward.D2")
+# Plot complete linkage
+plot(points_compl, main = "Complete Linkage", xlab = "Oservations", sub = "", hang = -1, labels = F)
+
+# Ward's algorithm appears to provide a clear result
+plot(points_ward, main = "Ward's Algorithm", xlab = "Observations", hang = -1, labels = F)
+```
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+# Distribution according to choiceof 3 and 6 clusters:
+cutt3 <- cutree(points_ward,k=3)
+print(table(cutt3))
+cutt6 <- cutree(points_ward,k=6)
+print(table(cutt6))
+```
+
+Based on these results, two instances of k (3 and 6) were further used.
+
+The clusters appear appropriately balanced in terms of observation distribution. 
+
+Further exploration went towards visualising the distribution of products along the clusters, using a heatmap approach. Here, k=6 is used as an example:
+
+```{r, warning=FALSE, echo = FALSE, eval = FALSE}
+# Integrate cluster variables in the sample + clean data frame
+df_clean_sample$cluster_3 <- cutt3
+df_clean_sample$cluster_6 <- cutt6
+```
+
+```{r, warning=FALSE, echo = TRUE, eval = FALSE}
+# Provide df for heatmap for 6-cluster to analyse product distribution
+create_clusterdistribution <- function(k, column) {
+  df_heat <- data.frame(matrix(ncol = 25, nrow = k))
+  colnames(df_heat) <- c("cluster", names(df_clean_sample[13:36]))
+  for (i in 1:k) {
+    sel <- filter(df_clean_sample, (!!as.name(column)) == i)
+    clust_row <- c(paste(k, "-",i), unlist(lapply(sel[13:36], sum), use.names = FALSE))
+    df_heat[i,] <- clust_row
+  }
+  return(df_heat)
+}
+# Produce heatmap data frames, i.e. raw data then a melted version for heatmap display
+df_heat <- create_clusterdistribution(k = 6, column = "cluster_6")  # Get a melted version of the data
+melted <- melt(data = df_heat, id.vars = "cluster", measure.vars = c(names(df_heat[,2:23])))
+scaled <- scale(as.numeric(melted[,3]))
+melted$value <- rescale(as.numeric(melted$value))
+# Clean + rescale
+df_heat <- select(df_heat, -c(cluster_3, days_firstContact))
+rescale <- function(x) (x-min(x))/(max(x) - min(x))
+df_heat[,2:23] <- lapply(df_heat[,2:23], as.numeric)
+df_heat[,2:23] <- rescale(df_heat[,2:23] )
+```
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+# Plot
+ggplot(data = melted, aes(x=variable, y=cluster, fill=melted$value)) + 
+  geom_tile() + theme(axis.text.x = element_text(angle = 90)) + ggtitle("6-Cluster distribution of products") +
+  xlab("Products") + ylab("Cluster") + scale_fill_gradient(low = "white", high = "steelblue") +  labs(fill = "Normalised total")
+```
+
+#### Discussion
+
+What may look rather boring (many white spots) from first glance is actually quite interesting. Those clusters with a higher values contain those customers that generally have more products in their portfolio. Practically speaking, a Marketing team could focus on these clusters and identify customers below the 'cluster threshold' for marketing activities. Then, taking clusters with rather high values in specific products with good revenues may be selected for specific product-related marketing activities.
+
+### 2. PCA (PCA / MCA)
+
+Very often in real life, and in particular in banking, the datasets involve mixed variable types, i.e. categorical and numerical ones. PCA works on numerical data, while MCA 'takes care' of categorical data. The package PCAmixdata includes both methods. The process steps are described in detail in this presentation: http://www.math.u-bordeaux.fr/~mchave100p/wordpress/wp-content/uploads/2012/12/chavent_useR_2015.pdf
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+# Clean up and get qualitative and quantitative variables for mixed PCA/MCA
+df_clean_sample$cust_activityIndex <- as.numeric(as.character(df_clean_sample$cust_activityIndex))
+
+X2 <- select(df_clean_sample, c(as.numeric(age), income_householdGross, cust_seniority, 
+                         days_firstContact, cust_activityIndex))
+
+df_clean_sample$province_code <- as.factor(as.character(df_clean_sample$province_code))
+df_clean_sample$sex <- as.factor(df_clean_sample$sex)
+df_clean_sample$cust_activityIndex <- as.factor(df_clean_sample$cust_activityIndex)
+df_clean_sample$cust_newIndex <- as.factor(df_clean_sample$cust_newIndex)
+
+x1 <- select(df_clean_sample, c(sex, cust_activityIndex, cust_newIndex))
+
+# Get PCA-mix. Preleiminary scaling is not required as it is provided in the process
+res.pcamix <- PCAmix(X.quali=x1, X.quanti = X2, rename.level=TRUE, 
+                     graph=FALSE, ndim = 10)
+```
+
+Result: Dimensions 1-5 explain > 90% of the PVE as shown in the print and plot asunder:
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+print(res.pcamix$eig)
+plot(cumsum(res.pcamix$eig[,2]), ylim = c(1,100), ylab = "Cumulative PVE", xlab = "Dimension", main = "Cumulative PVE along Dimensions")
+```
+
+The first 3 dimensions explain 73% of the PVE. It therefore appears reasonable to use them for visualisation of the datapoints obtained in / along hierarchical clustering. Here, the 6-cluster data is used to display the points:
+
+```{r, warning=FALSE, echo = FALSE, eval = FALSE}
+# Get PCAmix data for the cluster observations
+df_clean_sample$PCAmix1 <- res.pcamix$scores[,1]
+df_clean_sample$PCAmix2 <- res.pcamix$scores[,2]
+df_clean_sample$PCAmix3 <- res.pcamix$scores[,3]
+
+x <- df_clean_sample$PCAmix1
+y <- df_clean_sample$PCAmix2
+z <- df_clean_sample$PCAmix3
+
+scatter3D(x,y,z,  theta = 10, phi = 20, 
+          colvar = df_clean_sample$cluster_6, clab = "Cluster", xlab = "Dim 1", ylab ="Dim 2", zlab = "Dim 3", 
+          main="Distribution of Clusters in PCA Matrix", pch = 16, cex = 0.3)
+scatter3D(x,y,z,  theta = 40, phi = 60, 
+          colvar = df_clean_sample$cluster_6,clab = "Cluster", xlab = "Dim 1", ylab ="Dim 2", zlab = "Dim 3", 
+          main="Distribution of Clusters in PCA Matrix", pch = 16, cex = 0.3)
+scatter3D(x,y,z,  theta = 0, phi = 20,
+          colvar = df_clean_sample$cluster_6,clab = "Cluster", xlab = "Dim 1", ylab ="Dim 2", zlab = "Dim 3", 
+          main="Distribution of Clusters in PCA Matrix", pch = 16, cex = 0.3)
+
+```
+
+Unfortunately in the RMarkdown knit the colors and the labels are lost. Also I was unable to knit in the image files. Please therefore refer to the separate PDF document "Cluster Plots" in the submission.
+
+### 2. Cross-validation of PCA/MC
+
+Reduction of dimensionality can be quite critical when large datasets are treated on a regular basis (see e.g. Qui, page 1). I had to learn this lesson developing the code for this assessment and analysis, i.e. running the code several times a day, which resulted in having to select a sample for the sake of computing speed.
+
+Searching for cross-validation strategies for PCA in the internet I encountered articles focusing on finding the optimal number of PCs, and others focusing on the general performance using an LOOCV or more sophisticated straetegies to identify possible reductions of variables.
+
+As I have already elaborated on combining clustering with PCA/MDA I decided to implement a slightly different approach that takes into account the result from hierarchical clustering above. The idea is rather simplistic (see however Williams): Identifying squared errors of combinations of variables used in PCA by first applying PCAmix, then taking the scores to run hierarchical clustering, and comparing these results with the labels obtained in hierarchical clustering. I.e.:
+As time was running out I decided to take an even more simplistic approach so to gain a first 'feeling' on whether this approach could work. I.e., I decided on a ranking of the dataset's t variables and to run a n1, (n1 + n2), ... , (n1 + n2 + ... + nt) variables combination approach.
+
+```{r, warning=FALSE, echo = FALSE, eval = FALSE}
+# Prepare variables
+df_clean_sample$province_code <- as.factor(as.character(df_clean_sample$province_code))
+df_clean_sample$sex <- as.factor(df_clean_sample$sex)
+df_clean_sample$cust_activityIndex <- as.factor(df_clean_sample$cust_activityIndex)
+df_clean_sample$cust_newIndex <- as.factor(df_clean_sample$cust_newIndex)
+df_clean_sample$age <- as.integer(df_clean_sample$age)
+df_clean_sample$entry_channel <- as.factor(df_clean_sample$entry_channel)
+df_cust_sample$days_firstContact <- as.numeric(as.character(df_cust_sample$days_firstContact))
+class(df_clean_sample$cust_activityIndex)
+
+```
+
+```{r, warning=FALSE, echo = TRUE, eval = FALSE}
+# Variables vector in the order as found to be possibly reflecting the 'power' of each variable
+vars <- c("age", "income_householdGross", "cust_seniority", "days_firstContact", "cust_activityIndex", "sex", "cust_activityIndex", "cust_newIndex", "province_code", "entry_channel")
+# Run loop to obtain errors
+get_errors <- function(vars) {
+	# Vector holding errors
+  errs <- c()
+  PCA <- NULL
+	for (v in 1:length(vars)) {
+	  # As 'by pure chance' the quanti variables were found most important
+    # Select the combination of data according to the vars presented in the loop instance
+	  if (v < 5) { 
+	    X_quanti <- select(df_clean_sample, vars[1:v]) 
+	    print("calculating PCA")
+	    PCA <- PCAmix(X.quali=NULL, X.quanti = X_quanti, rename.level=TRUE, graph=FALSE, ndim = 10)
+	   }
+    else {
+      X_quanti <- select(df_clean_sample, vars[1:4])
+      X_quali <- select(df_clean_sample, vars[5:v])
+      print("calculating PCA")
+      PCA <- PCAmix(X.quali=X_quali, X.quanti = X_quanti, rename.level=TRUE, graph=FALSE, ndim = 10)
+    }
+
+    # Consider all PCs for further use; in an even more intellligent approach one may think of even varying the number of PCs
+  	# Get distance (Euclidean) matrix then hclust
+	  print("calculating distance")
+  	dist <- daisy(PCA$scores, metric = "euclidean")
+  	points <- hclust(dist, method = "ward.D2")
+  	cutt <- cutree(points,k=6)
+  	err <- mean(cutt6 - cutt)
+  	errs <- c(errs, err)
+  	print(cat("error ", v, " ", err))
+	}
+  return(errs)
+}
+errs <- get_errors(vars)
+df_errs <- data.frame(nums = seq(1,10,by=1), errs = errs)
+
+```
+
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+ggplot(data=df_errs, aes(x=nums, y=errs)) +
+  geom_line()+ ggtitle("Variable sequence error") + xlab("Variable sequence") + ylab("Mean error") +
+  geom_point() + scale_x_continuous(breaks = c(seq(from = 1, to = 10, by = 1)))
+
+```
+
+#### Result and Discussion
+
+The result is clear: Arriving at the 8th variable, 'customer new index', the error rate drops to near zero, whereas in all other combinations the error is significantly below of above zero. Also surprisingly, the variables that I expected to be possibly most 'influential' / explaining, i.e. province code and entry channel, produced a significant worsening of the result. 
+
+The result also appears a 'benefit' insofar as the 'benchmark' used, i.e. clustering from point (1) above, took all variables into account, whereas according to the mixed-PCA approach, the variables can be reduced.
+
+### 4. Basket Analysis
+
+Basket analysis appear to be a common approach when aiming for a data mining method to support recommendations. For this dataset however I could not find any useful notion or documentation what regards application of basket analysis (compare also my note above on Kaggle).
+
+As a novice in this field I start with the most frequently used and in the subject taught algorithm, Apriori. This however without taking all monthly data provided in the dataset, but focusing on those events where there was a change in products within a client portfolio, as done above in preprocessing (populating the df_transact data frame). 
+
+For comparison / identification of a possible added value I combined the clustering results from above with Apriori, i.e. producing an Apriori itemset for every of the identified clusters. As a first example I used the 3-cluster group.
+
+```{r, warning=FALSE, echo = TRUE, eval = FALSE}
+# Use the relevant rows (indicating the new product) and put the product vectors into a list to be used in Apriori
+get_apriori <- function(cust_vector) {
+  print("starting")
+  df_trx <- df_transact[df_transact$customer_id %in% cust_vector,]
+  print("selection done")
+  blist <- list()
+  for (row in seq(1, nrow(df_trx), by=2)) {
+    tr <- which(df_trx[row+1,3:26] == 1)
+    blist <- list.append(blist, tr)
+    # Progress
+    print(row/nrow(df_trx))
+  }
+  print("done")
+  Tr_object <- as(blist, "transactions")
+  FI <- apriori(Tr_object, parameter = list(support = 0.2, target = "frequent itemsets"))
+  return(FI)
+}
+
+# Get Apriori notion for all customers from sample
+FI_full <- get_apriori(df_clean$customer_id)
+
+# Let's take the customers from the 3-cluster distribution we identified with clustering above
+cl1_custs <- filter(df_clean_sample, cluster_3 == 1)[2]
+cl2_custs <- filter(df_clean_sample, cluster_3 == 2)[2]
+cl3_custs <- filter(df_clean_sample, cluster_3 == 3)[2]
+
+FI_cl1 <- get_apriori(cl1_custs$customer_id)
+FI_cl2 <- get_apriori(cl2_custs$customer_id)
+FI_cl3 <- get_apriori(cl3_custs$customer_id)
+inspect(sort(FI_cl2, by="support"))
+
+full_result <- inspect(sort(FI_full, by="support")[1:6])
+cl1_result <- inspect(sort(FI_cl1, by="support")[1:16])
+cl2_result <- inspect(sort(FI_cl2, by="support")[1:4])
+cl3_result <- inspect(sort(FI_cl3, by="support")[1:3])
+
+```
+```{r, warning=FALSE, echo = TRUE, eval = TRUE}
+# Full dataset observations
+print(full_result)
+# Cluster 1 observations
+print(cl1_result)
+# Cluster 2 observations
+print(cl2_result)
+# Cluster 3 observations
+print(cl3_result)
+```
+
+#### Discussion
+
+As one might have expected from clustering, above the results in this basket analysis do not present a very useful indication for recommendations: 
+- Support decreases steeply
+- Clusters 2 and 3 provide only very short lists of items
+- Largely single-item baskets
+- Repetitive {3,24} instance (which represents current account together with pensions plan account)
+
+Exception is cluster 1, which results in more interesting basket combinations, and more 'sustainable' support rates until instance 16. Marketing department could consider investigating whether recommendations within this cluster may be an asset for targeted marketing activities.
+
+
+## Conclusions
+
+i. Exploring 'other' ways to identify potentials for recommendation systems using data mining methods appears to be fruitful: Not only provide parts of the methods (in particular PCA / Clustering) promising results that motivate further research, but also their combination could reveal quite effective approaches, alternatively to what is currently popular (XBoost). The 'easiest' and at the start apparently most promising way, basket analysis on the contrary, did not emerge very meaningful results.
+
+iii. It is very much worth the while investing time and energy into cross-validation, also in ways of alternative approaches, i.e. using results of one method for cross-validation of another method, as shown by the combination of clustering used for the purpose of cross-validation of PCA-mix.
+
+ii. From a learning point of view this was a highly interesting experience for me personally, dealing with 'big data' in particular as data preprocessing turned out to be extremely cumbersome, taking substantial time off using models and analysis. I noted many learned lessons. Also I completely underestimated the actual learning curve for RMarkdown which made me struggle in the last days of writing this report and finalising the results / code. Actually it was quite a disaster in particular as I can apply this work directly at my workplace. Nonetheless I thank the subject team for the insight brought by the first 3 assessments and the experience, and their hard work.
+
+
+#### References
+
+Kordik: Machine Learning for Recommender systems / June 2018 / https://medium.com/recombee-blog/machine-learning-for-recommender-systems-part-1-algorithms-evaluation-and-cold-start-6f696683d0ed
+
+Qi et.al: Global Principal Component Analysis for Dimensionality Reduction in Distributed Data Mining / University of Tennessee
+
+Sharahi et. al: Classify the Data of Bank Customers Using Data Mining and Clustering Techniques / University of Tehran / February 2015 / https://pdfs.semanticscholar.org/8b51/bf249cfd10407cc20cd33ea5d5fe9de37340.pdf
+
+Williams: How to cross-validate PCA, clustering, and matrix decomposition models / Alex Williams / February 2018 / http://alexhwilliams.info/itsneuronalblog/2018/02/26/crossval/
+
+
+
